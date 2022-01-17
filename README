@@ -1,6 +1,9 @@
 * SUMMARY * 
 - Data aggragated from ICO dataset (International Coffee Organization) and World Bank's Poverty data 
-- A 5-page visualization dashboard in R presenting coffee production over time, comparing retail and grower profit margins, and measuring grower revenue against national poverty lines 
+- A 5-page visualization dashboard in R presenting coffee production over time, comparing retail and grower profit margins, 
+and measuring grower revenue against national poverty lines 
 
 *STORY*
-What motivated this visualization was both a wish to apply the theoretical skills I gained in my data analysis course but also to learn more about something I have been growing a passion for through the past year - coffee. As an emerging issue in the coffee industry is ethical trade and fair compensation of farmers, I wanted to see for myself what the situation was like in the coffee world and who were profiting the most 
+What motivated this visualization was both a wish to apply the theoretical skills I gained in my data analysis course but also to learn more about something 
+I have been growing a passion for through the past year - coffee. As an emerging issue in the coffee industry is ethical trade and fair compensation of farmers, 
+I wanted to see for myself what the situation was like in the coffee world and who were profiting the most 
