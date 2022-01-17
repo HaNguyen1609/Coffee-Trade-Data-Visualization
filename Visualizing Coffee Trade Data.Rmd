@@ -1,0 +1,261 @@
+---
+title: "Visualizing Coffee Trade data"
+output: html_notebook
+---
+
+RMarkdown Notebook visualization stack presenting coffee production over time, comparing retail and grower profit margins, and measuring grower revenue against national poverty lines
+
+```{r}
+setwd("~/Desktop/Personal Projects/Coffee Data ")
+#import packages 
+library(RColorBrewer)
+library(dplyr)
+library(plotly)
+library(tidyverse)
+library(gridExtra)
+library(ggplot2)
+library(readxl)
+library(waterfall)
+
+```
+
+### Prepare Data
+
+```{r}
+#import data files 
+total_production = read.csv(file = 'total-production.csv')
+retail_prices = read.csv(file = 'retail-prices.csv')
+grower_compensation = read.csv(file = 'prices-paid-to-growers.csv') 
+exports_number = read.csv(file = 'exports-crop-year.csv')
+poverty_lines = read.csv(file = 'national-poverty-lines-vs-gdp-per-capita.csv')
+coffee_consumption = read.csv(file = 'disappearance.csv')
+#rename columns
+colnames(retail_prices)[which(names(retail_prices) == 'retail_prices')] = 'country'
+#subset columns from poverty lines
+poverty_lines = data.frame(subset(poverty_lines, select = c(National.poverty.lines..Jolliffe.and.Prydz..2016..,Entity,Year)))                             
+#remove NAs 
+poverty_lines = na.omit(poverty_lines) 
+```
+
+### Visualizing total producion over the years
+```{r}
+#transpose total production df
+total_production_2 = data.frame(t(total_production))
+#create function to take first row as column names
+header.true <- function(df) {
+  names(df) <- as.character(unlist(df[1,]))
+  df[-1,]
+}
+total_production_2 = header.true(total_production_2)
+#create a column of years from 1990-2018
+years = seq(1990,2018)
+total_production_2 <- tibble::rownames_to_column(total_production_2, "Year")
+total_production_2["Year"] = c(years)
+```
+
+
+```{r}
+#Plot first 6 countries
+#create list of plots 
+plot_list = list()
+#create 6 plots, add to list of plots
+for (i in 2:7) {
+  total_production_2[,i] = sapply(total_production_2[,i], as.numeric)
+  p = ggplot(data = total_production_2,aes_string(x = "Year", y =  as.name((colnames(total_production_2[i]))))) + geom_point(stat = "identity") 
+  plot_list[[i]] = p
+}
+#drop first plot
+plot_list = plot_list[-1]
+#show plot list
+do.call(grid.arrange, list(grobs = plot_list, ncol=3))
+```
+
+### Compare grower vs retail profit margin  
+```{r}
+# Prepare data
+production_costs = read_excel("Coffee Production Costs.xlsx")
+production_costs = data.frame(t(production_costs))
+production_costs = subset(production_costs, select = c(X7))
+production_costs['country'] = rownames(production_costs)
+production_costs = production_costs[-1,]
+production_costs['Production Costs'] = production_costs['X7'] #assign production cost column
+
+# Aggregate data
+colnames(grower_compensation)[which(names(grower_compensation) == 'prices_paid_to_growers')] = 'country' #rename country column
+costs_compensation = data.frame(inner_join(production_costs, grower_compensation)) #take overlap between porouduction cost and grower compensation 
+costs_compensation = data.frame((subset(costs_compensation, select = (-c(X7)))))
+A = function(x) x * 0.45359237 #From 1 pound to 1 kg 
+costs_compensation['Production.Costs'] = sapply(costs_compensation['Production.Costs'], as.numeric)
+x = as.numeric(colMeans(costs_compensation['Production.Costs']))
+costs_compensation['Production.Costs'] = apply(costs_compensation['Production.Costs'],2, A)
+```
+
+```{r}
+#function to calculate profit margin 
+profit_margin = function(price, consumption, cost, production) {
+  (((price * consumption) - (cost*production)) /  (price * consumption)) 
+}
+#function to calculate average over the years
+average = function(dataframe, a){
+ dataframe = dataframe[-1]
+ avg_data = colMeans(dataframe, na.rm=TRUE)
+ avg_data = data.frame(t(data.frame(avg_data)))
+ rownames(avg_data) = a
+ return (avg_data)
+}
+#calculate profit margin for retail side 
+
+average_retail_price = average(retail_prices, "average_retail_price")
+average_coffee_consumption = average(coffee_consumption, "average_coffee_consumption")
+average_coffee_consumption[1,] = average_coffee_consumption[1,]*60*1000 #multiply by 60-kg thousand bags 
+average_coffee_trade_price = average(grower_compensation, "average_coffee_trade_price")
+average_exports = average(exports_number, "total_exports")
+average_exports[1,] = average_exports[1,] * 60 *1000 #multiply by 60-kg thousand bags 
+#average retail export-price-consumption df
+retail_price_consumption = rbind(average_retail_price, average_coffee_consumption,average_coffee_trade_price, average_exports)
+retail_price_consumption = data.frame(t(retail_price_consumption)) #transpose
+#calculate retail revenue 
+retail_price_consumption$revenue = 0 
+retail_price_consumption$revenue = retail_price_consumption$average_retail_price * retail_price_consumption$average_coffee_consumption
+#calculate retail costs
+retail_price_consumption$cost = 0 
+retail_price_consumption$cost = retail_price_consumption$average_coffee_trade_price*retail_price_consumption$total_exports
+#caclculate profit margin 
+retail_price_consumption$profit_margin = 0 
+retail_price_consumption$profit_margin = mapply(profit_margin, retail_price_consumption$average_retail_price,retail_price_consumption$average_coffee_consumption, retail_price_consumption$average_coffee_trade_price,retail_price_consumption$total_exports)
+#create years column 
+years = seq(1990,2018)
+retail_price_consumption <- tibble::rownames_to_column(retail_price_consumption, "Year")
+retail_price_consumption["Year"] = c(years)
+```
+
+
+```{r}
+#Calculate profit margin for grower side 
+#average production of coffee
+average_production = average(total_production, "average_production")
+average_production[1,] = average_production[1,]*60*1000
+#grower price - exports - production 
+grower_price_consumption = rbind(average_coffee_trade_price,average_exports, average_production)
+grower_price_consumption = data.frame(t(grower_price_consumption))
+#grower production cost/lkg 
+grower_price_consumption$production_costs = 1
+grower_price_consumption$production_costs = grower_price_consumption$production_costs * as.numeric(colMeans(costs_compensation['Production.Costs']))
+#grower revenue 
+grower_price_consumption$revenue = 0 
+grower_price_consumption$revenue = grower_price_consumption$average_coffee_trade_price*grower_price_consumption$total_exports
+#grower costs 
+grower_price_consumption$cost = 0 
+grower_price_consumption$cost = grower_price_consumption$production_costs*grower_price_consumption$average_production 
+#grower profit margin 
+grower_price_consumption$profit_margin = 0 
+grower_price_consumption$profit_margin = mapply(profit_margin, grower_price_consumption$average_coffee_trade_price,grower_price_consumption$total_exports, grower_price_consumption$production_costs,grower_price_consumption$average_production)
+
+#create years column 
+grower_price_consumption <- tibble::rownames_to_column(grower_price_consumption, "Year")
+grower_price_consumption["Year"] = c(years)
+```
+#### Bar chart: revenue - cost - profit margin for both in each year . vertical 3 part + margin percent
+```{r}
+#barplot as matrix profit margin , revenue between the two 
+
+profit_margin = data.frame(cbind(grower_price_consumption$Year, grower_price_consumption$profit_margin, retail_price_consumption$profit_margin))
+colnames(profit_margin)[which(names(profit_margin) == 'X1')] = 'Year'
+colnames(profit_margin)[which(names(profit_margin) == 'X2')] = 'Grower Profit Margin'
+colnames(profit_margin)[which(names(profit_margin) == 'X3')] = 'Retail Profit Margin'
+profit_margin = data.frame(t(profit_margin))
+profit_margin = header.true(profit_margin)
+barplot(height = as.matrix(profit_margin), las=2, cex.names = 0.9, col = c("chartreuse4","cadetblue3"), beside = TRUE, legend=TRUE, ylim = c(0,1.5))
+
+revenue = data.frame(cbind(grower_price_consumption$Year, grower_price_consumption$revenue, retail_price_consumption$revenue))
+colnames(revenue)[which(names(revenue) == 'X1')] = 'Year'
+colnames(revenue)[which(names(revenue) == 'X2')] = 'Grower Revenue'
+colnames(revenue)[which(names(revenue) == 'X3')] = 'Retail Revenue'
+revenue = data.frame(t(revenue))
+revenue = header.true(revenue)
+opar = par(oma = c(1,0,0,8))
+barplot(height = as.matrix(revenue),las=2, cex.names = 0.5, cex.axis = 0.5,  col = c("chartreuse4","cadetblue3"), beside = TRUE, yaxp=c(0, max(revenue), 5))
+par(opar)
+opar = par(oma = c(0,0,0,0), mar = c(0,0,0,0), new = TRUE)
+legend(x = "right", legend = rownames(revenue), fill = c("chartreuse4","cadetblue3"), bty = "n", y.intersp = 2)
+par(opar) # Reset par
+
+
+
+```
+
+
+
+
+### Plot farmer profits/kg of coffee to the poeverty lỉne (USD/day) for each country 
+```{r}
+# Prepare data
+colnames(poverty_lines)[which(names(poverty_lines) == 'Entity')] = 'country'
+costs_compen_country = data.frame(inner_join(costs_compensation,poverty_lines))
+costs_compen_country['Profits'] =costs_compen_country$X2011 - costs_compen_country$Production.Costs
+colnames(costs_compen_country)[which(names(costs_compen_country) == 'National.poverty.lines..Jolliffe.and.Prydz..2016..')] = 'Poverty Lines'
+```
+
+```{r warning=FALSE}
+# Plot
+fig <- plot_ly()
+fig <- fig %>%
+  add_trace(
+    type = "indicator",
+    mode = "number+gauge",
+    value = as.numeric(subset(subset(costs_compen_country, country == 'Colombia'),select = c(Profits))),
+    domain = list(x = c(0.25, 1), y = c(0.4, 0.6)),
+    title = list(text = 'Colombia'),
+    gauge = list(
+      shape = "bullet",
+      axis = list(range = list(NULL, 6)),
+      threshold = list(
+        line = list(color = "red", width = 2),
+        thickness = 0.75,
+        value = as.numeric(subset(costs_compen_country, country == 'Colombia')['Poverty Lines'])),
+      steps = list(
+        list(range = c(0,0.5), color = "white"),
+        list(range = c(0.5,2), color = "white"))),
+    bar = list(color = "black"))
+fig <- fig %>%
+  add_trace(
+    type = "indicator",
+    mode = "number+gauge",
+    value = as.numeric(subset(subset(costs_compen_country, country == 'Guatemala'),select = c(Profits))),
+    domain = list(x = c(0.25, 1), y = c(0.7, 0.9)),
+    title = list(text = 'Guatemala'),
+    gauge = list(
+      shape = "bullet",
+      axis = list(range = list(NULL, 6)),
+      threshold = list(
+        line = list(color = "red", width = 2),
+        thickness = 0.75,
+        value = as.numeric(subset(costs_compen_country, country == 'Guatemala')['Poverty Lines'])),
+      steps = list(
+        list(range = c(0,0.5), color = "white"),
+        list(range = c(0.5,2), color = "white"))),
+    bar = list(color = "black"))
+fig <- fig %>%
+  add_trace(
+    type = "indicator",
+    mode = "number+gauge",
+    value = as.numeric(subset(subset(costs_compen_country, country == 'El Salvador'),select = c(Profits))),
+    domain = list(x = c(0.25, 1), y = c(0.08, 0.25)),
+    title = list(text = 'El Salvador'),
+    gauge = list(
+      shape = "bullet",
+      axis = list(range = list(NULL, 6)),
+      threshold = list(
+        line = list(color = "red", width = 2),
+        thickness = 0.75,
+        value = as.numeric(subset(costs_compen_country, country == 'El Salvador')['Poverty Lines'])),
+      steps = list(
+        list(range = c(0,0.5), color = "white"),
+        list(range = c(0.5,2), color = "white"))),
+    bar = list(color = "black"))
+fig
+
+```
+
+
+
